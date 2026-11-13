@@ -15,6 +15,8 @@
 
 #include "graphic_memory.h"
 
+#include <charconv>
+#include <sstream>
 #include <v1_0/imemory_tracker_interface.h>
 #include "file_helper.h"
 #include "hilog/log.h"
@@ -105,12 +107,22 @@ int32_t GetGLByPid(int32_t pid)
 void CreateDmaInfo(const std::string &line, std::map<uint64_t, DmaInfo> &dmaInfoMap)
 {
     DmaInfo dmaInfo;
-    char name[256] = {0}; // 256: max size of name
-    if (sscanf_s(line.c_str(), "%255s %llu %*llu %llu %llu %*n %*s %*s %*s",
-                 name, sizeof(name), &dmaInfo.pid, &dmaInfo.size, &dmaInfo.ino) == 0) {
+    std::string pidText, fdText, sizeText, inoText;
+    std::istringstream fields(line);
+    uint32_t fd = 0;
+    auto decimal = [](const std::string &text, auto &value) {
+        if (text.empty()) {
+            return false;
+        }
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), value, 10);
+        return result.ec == std::errc() && result.ptr == text.data() + text.size();
+    };
+    if (!(fields >> dmaInfo.name >> pidText >> fdText >> sizeText >> inoText) ||
+        dmaInfo.name.size() > 255 || !decimal(pidText, dmaInfo.pid) || !decimal(fdText, fd) ||
+        !decimal(sizeText, dmaInfo.size) || !decimal(inoText, dmaInfo.ino) ||
+        dmaInfo.pid == 0 || dmaInfo.size == 0 || dmaInfo.ino == 0) {
         return;
     }
-    dmaInfo.name = name;
     dmaInfo.size /= BYTE_PER_KB;
     auto it = dmaInfoMap.find(dmaInfo.ino);
     if (it == dmaInfoMap.end()) {
@@ -118,6 +130,7 @@ void CreateDmaInfo(const std::string &line, std::map<uint64_t, DmaInfo> &dmaInfo
     } else if ((dmaInfo.name != "composer_host" && dmaInfo.name != "render_service") ||
                (dmaInfo.name == "render_service" && it->second.name == "composer_host")) {
         it->second.pid = dmaInfo.pid;
+        it->second.name = dmaInfo.name;
     }
 }
 
